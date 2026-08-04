@@ -1,19 +1,21 @@
 import json
 import glob
 import os
+import sys
 import numpy as np
 from PIL import Image
 
 ROOT, H_PRIOR = "data", 0.650
-CITIES = sorted(os.listdir(f"{ROOT}/gtFine/train"))[:5]
+SPLIT = sys.argv[1] if len(sys.argv) > 1 else "val"
+CITIES = sorted(os.listdir(f"{ROOT}/gtFine/{SPLIT}"))
 
 rows = []  # (h_px, Z_true, Z_pred)
 
 for city in CITIES:
-    for pf in sorted(glob.glob(f"{ROOT}/gtFine/train/{city}/*_polygons.json")):
+    for pf in sorted(glob.glob(f"{ROOT}/gtFine/{SPLIT}/{city}/*_polygons.json")):
         stem = os.path.basename(pf).replace("_gtFine_polygons.json", "")
-        cf = f"{ROOT}/camera/train/{city}/{stem}_camera.json"
-        df = f"{ROOT}/disparity/train/{city}/{stem}_disparity.png"
+        cf = f"{ROOT}/camera/{SPLIT}/{city}/{stem}_camera.json"
+        df = f"{ROOT}/disparity/{SPLIT}/{city}/{stem}_disparity.png"
         if not (os.path.exists(cf) and os.path.exists(df)):
             continue
         cam = json.load(open(cf))
@@ -52,8 +54,8 @@ r = np.array(rows)
 h_px, Zt, Zp = r[:, 0], r[:, 1], r[:, 2]
 rel = (Zp - Zt) / Zt          # signed, not absolute
 
-print(f"n={len(r)}  prior={H_PRIOR*1000:.0f} mm\n")
-print(f"{'box h (px)':<12}{'n':>6}{'med Z_true':>12}{'bias':>9}{'p25':>8}{'p75':>8}{'MAE%':>8}")
+print(f"split={SPLIT}  n={len(r)}  prior={H_PRIOR*1000:.0f} mm\n")
+print(f"{'box h (px)':<12}{'n':>6}{'med Z_true':>12}{'bias':>9}{'p25':>8}{'p75':>8}{'|err|%':>8}")
 for lo, hi in [(0, 15), (15, 30), (30, 60), (60, 10_000)]:
     m = (h_px >= lo) & (h_px < hi)
     if m.sum() < 10:

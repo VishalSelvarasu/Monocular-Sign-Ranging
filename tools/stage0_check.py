@@ -1,20 +1,26 @@
 import json
 import glob
 import os
+import sys
 import numpy as np
 from PIL import Image
 
 ROOT = "data"
-CITIES = sorted(os.listdir(f"{ROOT}/gtFine/train"))[:5]
+SPLIT = sys.argv[1] if len(sys.argv) > 1 else None
+if SPLIT not in ("train", "val"):
+    sys.exit("usage: python <script>.py <train|val> [n_cities]")
+CITIES = sorted(os.listdir(f"{ROOT}/gtFine/{SPLIT}"))
+if len(sys.argv) > 2:
+    CITIES = CITIES[:int(sys.argv[2])]
 
 n_img = n_sign = n_ok = 0
 sizes, dists, fills = [], [], []
 
 for city in CITIES:
-    for pf in sorted(glob.glob(f"{ROOT}/gtFine/train/{city}/*_polygons.json")):
+    for pf in sorted(glob.glob(f"{ROOT}/gtFine/{SPLIT}/{city}/*_polygons.json")):
         stem = os.path.basename(pf).replace("_gtFine_polygons.json", "")
-        cf = f"{ROOT}/camera/train/{city}/{stem}_camera.json"
-        df = f"{ROOT}/disparity/train/{city}/{stem}_disparity.png"
+        cf = f"{ROOT}/camera/{SPLIT}/{city}/{stem}_camera.json"
+        df = f"{ROOT}/disparity/{SPLIT}/{city}/{stem}_disparity.png"
         if not (os.path.exists(cf) and os.path.exists(df)):
             continue
         n_img += 1
@@ -53,6 +59,7 @@ for city in CITIES:
                 dists.append(Z)
 
 sizes, dists, fills = map(np.array, (sizes, dists, fills))
+print(f"split={SPLIT}  cities={len(CITIES)}")
 print(
     f"images={n_img}  signs={n_sign}  usable={n_ok}  ({100*n_ok/max(n_sign, 1):.0f}%)")
 print(f"disparity fill inside boxes: median={np.median(fills):.2f}")

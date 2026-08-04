@@ -6,13 +6,15 @@ Monocular Sign Ranging estimates traffic-sign distance from a single camera imag
 > The current results cover the **ranging method only**.  
 > No traffic-sign detector is involved yet. All measurements were produced using ground-truth traffic-sign annotations from Cityscapes, so the reported error is **not** an end-to-end detector-and-ranging result.
 
+Headline numbers come from the Cityscapes **val** split. The size prior was derived on the train split, so val is held out from every fitted quantity.
+
 | Box height | Samples | Median true distance | Median bias | 25th percentile | 75th percentile | Median \|error\| |
 |---|---:|---:|---:|---:|---:|---:|
-| 15–30 px | 975 | 68.5 m | 0.0% | -17% | +29% | 21.3% |
-| 30–60 px | 688 | 38.4 m | 0.1% | -23% | +17% | 22.5% |
-| 60+ px | 331 | 19.8 m | -5.6% | -24% | +8% | 19.1% |
+| 15–30 px | 730 | 63.9 m | +9.0% | -12% | +43% | 23.7% |
+| 30–60 px | 527 | 36.0 m | +3.1% | -20% | +38% | 24.7% |
+| 60+ px | 223 | 18.4 m | -13.3% | -28% | +11% | 23.5% |
 
-Across a distance range of approximately 20–70 metres, the method behaves like a **±20% ranging instrument**.
+Across a distance range of approximately 18–64 metres, the method behaves like a **±24% ranging instrument**, with median bias staying within ±13%.
 
 Median absolute error remains nearly constant while the median distance changes by roughly 3.5 times.
 
@@ -20,7 +22,7 @@ If pixel quantization were the dominant source of error, the smallest and most d
 
 The result instead suggests that the dominant limitation is uncertainty in the real physical size of the sign. This agrees with the variation measured during Stage 1.
 
-Full method notes and intermediate distributions: [FINDINGS.md](FINDINGS.md).
+Full method notes, the train-split tables, and intermediate distributions: [FINDINGS.md](FINDINGS.md).
 
 ## Method and Validation
 
@@ -32,11 +34,13 @@ $$
 
 GTSDB lacks the calibration and metric reference data needed for validation. Cityscapes supplies camera intrinsics, stereo disparity, and traffic-sign polygons, so I used its ground-truth boxes to isolate ranging error before introducing detector error.
 
-The feasibility study covered 825 images and 5,512 polygons; 4,863 signs were usable, with median size 22 px and median reference distance 48 m. A disparity-bleed check found a typical 2–4% difference between median and 90th-percentile disparity that decreased for larger signs, so I retained median disparity as the reference.
+The feasibility study covered 825 images and 5,512 polygons on five train cities; 4,863 signs were usable, with median size 22 px and median reference distance 48 m. A disparity-bleed check found a typical 2–4% difference between median and 90th-percentile disparity that decreased for larger signs, so I retained median disparity as the reference.
 
 ## Stage 1: Sign-Size Prior and Limitation
 
 Inverting the equation for 991 near-square signs at least 30 px high produced a median inferred height of 651 mm and an interquartile range of 574–842 mm. The model uses $H_{\text{real}}=0.650\text{ m}$.
+
+Re-deriving the same quantity on the held-out val split gives 641 mm, so the prior transfers. Val nevertheless produces a wider error spread because its size distribution is more strongly bimodal: 17.7% of clean val signs fall in the 400–500 mm bin against 13.1% on train. More small signs at the same median means the same prior is wrong more often in both directions.
 
 Real variation in sign size and shape creates an approximate bias floor of $-12\%$ to $+30\%$ even with a perfectly measured box. A stronger system would classify the sign shape or size class before selecting its physical-size prior.
 
@@ -50,7 +54,7 @@ Two filters were tested and rejected: `Z_true < 120 m` and `disparity ≥ 6 px`.
 
 ## Planned Work
 
-The next stage will train a YOLO-based detector on GTSDB, evaluate tiled inference for small signs, and connect predicted boxes to the ranging model.
+The next stage will train a single-class traffic-sign detector on Cityscapes train and evaluate the full pipeline on val, so that any degradation from the current numbers is attributable to box localization alone. A GTSDB-trained detector evaluated on the same val images will follow; the difference between the two measures the cost of the camera domain gap.
 
 Distance is inversely proportional to measured box height, so localization error propagates directly:
 
@@ -60,7 +64,7 @@ $$
 
 A box that is too short will overestimate the distance. A box that is too tall will underestimate it.
 
-The current ±20% result should therefore be treated as the performance of the geometry stage only. Detector errors will add to it. Later work will cover INT8 quantization, latency, memory use, target-hardware testing, and temporal stability.
+The current ±24% result should therefore be treated as the performance of the geometry stage only. Detector errors will add to it. Later work will cover INT8 quantization, latency, memory use, target-hardware testing, and temporal stability.
 
 ## Reproduce
 
@@ -68,9 +72,15 @@ Download `gtFine_trainvaltest`, `camera_trainvaltest`, and
 `disparity_trainvaltest` from cityscapes-dataset.com into `data/`.
 Dataset used under the Cityscapes non-commercial licence; not redistributed.
 
+Every script takes the split as its first argument and an optional city
+count as its second.
+
 ```bash
-python tools/stage0_check.py
-python tools/stage0_bleed_check.py
-python tools/stage1_size_prior.py
-python tools/stage2_error_curve.py
+# feasibility and prior derivation, five train cities
+python tools/stage0_check.py train 5
+python tools/stage0_bleed_check.py train 5
+python tools/stage1_size_prior.py train 5
+
+# headline result, held-out val split
+python tools/stage2_error_curve.py val
 ```

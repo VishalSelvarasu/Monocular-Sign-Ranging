@@ -1,19 +1,25 @@
 import json
 import glob
 import os
+import sys
 import numpy as np
 from PIL import Image
 
 ROOT = "data"
-CITIES = sorted(os.listdir(f"{ROOT}/gtFine/train"))[:5]
+SPLIT = sys.argv[1] if len(sys.argv) > 1 else None
+if SPLIT not in ("train", "val"):
+    sys.exit("usage: python <script>.py <train|val> [n_cities]")
+CITIES = sorted(os.listdir(f"{ROOT}/gtFine/{SPLIT}"))
+if len(sys.argv) > 2:
+    CITIES = CITIES[:int(sys.argv[2])]
 
 rows = []  # (short_side_px, Z_med, Z_p90)
 
 for city in CITIES:
-    for pf in sorted(glob.glob(f"{ROOT}/gtFine/train/{city}/*_polygons.json")):
+    for pf in sorted(glob.glob(f"{ROOT}/gtFine/{SPLIT}/{city}/*_polygons.json")):
         stem = os.path.basename(pf).replace("_gtFine_polygons.json", "")
-        cf = f"{ROOT}/camera/train/{city}/{stem}_camera.json"
-        df = f"{ROOT}/disparity/train/{city}/{stem}_disparity.png"
+        cf = f"{ROOT}/camera/{SPLIT}/{city}/{stem}_camera.json"
+        df = f"{ROOT}/disparity/{SPLIT}/{city}/{stem}_disparity.png"
         if not (os.path.exists(cf) and os.path.exists(df)):
             continue
         cam = json.load(open(cf))
@@ -50,7 +56,7 @@ r = np.array(rows)
 px, Zm, Zp = r[:, 0], r[:, 1], r[:, 2]
 gap = np.abs(Zm - Zp) / Zm
 
-print(f"n={len(r)}")
+print(f"split={SPLIT}  cities={len(CITIES)}  n={len(r)}")
 for lo, hi in [(0, 15), (15, 30), (30, 60), (60, 10_000)]:
     m = (px >= lo) & (px < hi)
     if m.sum() < 10:

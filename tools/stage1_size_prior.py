@@ -1,19 +1,25 @@
 import json
 import glob
 import os
+import sys
 import numpy as np
 from PIL import Image
 
 ROOT = "data"
-CITIES = sorted(os.listdir(f"{ROOT}/gtFine/train"))[:5]
+SPLIT = sys.argv[1] if len(sys.argv) > 1 else None
+if SPLIT not in ("train", "val"):
+    sys.exit("usage: python <script>.py <train|val> [n_cities]")
+CITIES = sorted(os.listdir(f"{ROOT}/gtFine/{SPLIT}"))
+if len(sys.argv) > 2:
+    CITIES = CITIES[:int(sys.argv[2])]
 
 rows = []  # (h_px, w_px, Z, H_implied_mm)
 
 for city in CITIES:
-    for pf in sorted(glob.glob(f"{ROOT}/gtFine/train/{city}/*_polygons.json")):
+    for pf in sorted(glob.glob(f"{ROOT}/gtFine/{SPLIT}/{city}/*_polygons.json")):
         stem = os.path.basename(pf).replace("_gtFine_polygons.json", "")
-        cf = f"{ROOT}/camera/train/{city}/{stem}_camera.json"
-        df = f"{ROOT}/disparity/train/{city}/{stem}_disparity.png"
+        cf = f"{ROOT}/camera/{SPLIT}/{city}/{stem}_camera.json"
+        df = f"{ROOT}/disparity/{SPLIT}/{city}/{stem}_disparity.png"
         if not (os.path.exists(cf) and os.path.exists(df)):
             continue
         cam = json.load(open(cf))
@@ -53,7 +59,7 @@ r = np.array(rows)
 h_px, w_px, Z, H = r[:, 0], r[:, 1], r[:, 2], r[:, 3]
 ar = w_px / h_px
 
-print(f"n={len(r)}")
+print(f"split={SPLIT}  cities={len(CITIES)}  n={len(r)}")
 print(f"aspect ratio w/h: p10={np.percentile(ar, 10):.2f} "
       f"median={np.median(ar):.2f} p90={np.percentile(ar, 90):.2f}")
 
