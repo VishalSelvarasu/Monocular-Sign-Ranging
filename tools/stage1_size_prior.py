@@ -74,3 +74,7 @@ counts, edges = np.histogram(H[m], bins=np.arange(0, 2100, 100))
 for c, e in zip(counts, edges):
     if c:
         print(f"  {e:4.0f}-{e+100:4.0f} mm  {'#' * int(60*c/counts.max()):<60} {c}")
+
+os.makedirs("results", exist_ok=True)
+np.savetxt(f"results/implied_height_{SPLIT}.csv", np.c_[h_px[m], H[m]],
+           delimiter=",", header="h_px,H_mm", comments="")

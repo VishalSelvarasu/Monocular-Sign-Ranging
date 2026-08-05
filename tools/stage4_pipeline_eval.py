@@ -120,10 +120,10 @@ for city in CITIES:
             else:
                 Z_pred = np.nan          # miss
 
-            rows.append((h, Z_true, Z_pred))
+            rows.append((h, Z_true, Z_pred, fy * H_PRIOR / h))
 
 r = np.array(rows)
-h_px, Zt, Zp = r[:, 0], r[:, 1], r[:, 2]
+h_px, Zt, Zp, Zp_prior = r[:, 0], r[:, 1], r[:, 2], r[:, 3]
 found = ~np.isnan(Zp)
 
 rel = np.full(len(r), np.inf)
@@ -178,3 +178,7 @@ print("\n|err| det = over detected signs only")
 print("|err| all = over every gt sign, misses = infinite error")
 print("false positives matched against ALL sign polygons, not the "
       "near-square ranging subset")
+
+os.makedirs("results", exist_ok=True)
+np.savetxt(f"results/pipeline_val_conf{CONF}.csv", r, delimiter=",",
+           header="h_px,Z_true,Z_pred_det,Z_pred_gt", comments="")
