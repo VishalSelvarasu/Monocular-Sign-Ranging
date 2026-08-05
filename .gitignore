@@ -1,2 +1,27 @@
 data/
+!data/README.md
 *.zip
+*.ppm
+train.log
+
+# model weights and runs
+runs/
+*.pt
+*.onnx
+*.engine
+*.tflite
+
+# credentials
+credentials.json
+cookies.txt
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# os
+Thumbs.db
+desktop.ini
