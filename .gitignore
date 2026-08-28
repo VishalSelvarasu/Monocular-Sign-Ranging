@@ -24,4 +24,6 @@ venv/
 
 # os
 Thumbs.db
-desktop.iniFINDINGS.md
+desktop.ini
+FINDINGS.md
+results/

@@ -1,9 +1,12 @@
+import matplotlib.ticker as mticker
 import matplotlib.pyplot as plt
 import os
+import sys
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 
+CONF = sys.argv[1] if len(sys.argv) > 1 else "0.3"
 RES, FIG = "results", "figures"
 H_PRIOR_MM = 650
 RANGE_EDGES = [15, 25, 35, 50, 70, 100, 150]
@@ -13,49 +16,53 @@ plt.rcParams.update({
     "figure.dpi": 150, "font.size": 9, "axes.grid": True,
     "grid.alpha": 0.25, "axes.spines.top": False, "axes.spines.right": False,
 })
-C_GT, C_DET, C_MISS = "#1f4e79", "#c1666b", "#888888"
+C_GT, C_DET, C_3 = "#1f4e79", "#c1666b", "#4f7942"
 
 
-def binned(x, y, edges):
-    """median and IQR of y within bins of x. returns centres, med, lo, hi, n"""
-    c, m, lo, hi, n = [], [], [], [], []
+def binned(x, y, edges, minimum=10):
+    c, m, lo, hi = [], [], [], []
     for a, b in zip(edges[:-1], edges[1:]):
         s = (x >= a) & (x < b) & np.isfinite(y)
-        if s.sum() < 10:
+        if s.sum() < minimum:
             continue
-        c.append(np.sqrt(a * b))          # geometric centre, log-ish spacing
+        c.append(np.sqrt(a * b))
         m.append(np.median(y[s]))
         lo.append(np.percentile(y[s], 25))
         hi.append(np.percentile(y[s], 75))
-        n.append(int(s.sum()))
-    return map(np.array, (c, m, lo, hi, n))
+    return map(np.array, (c, m, lo, hi))
+
+
+def load(name):
+    p = f"{RES}/{name}"
+    if not os.path.exists(p):
+        print(f"  missing {p}")
+        return None
+    return np.loadtxt(p, delimiter=",", skiprows=1)
 
 
 # ---------------------------------------------------------------- fig 1
-def fig_error_vs_range(conf=0.25):
-    f = f"{RES}/pipeline_val_conf{conf}.csv"
-    if not os.path.exists(f):
-        print(f"skip fig1: {f} missing")
+def fig_error_vs_range():
+    d = load(f"pipeline_test_conf{CONF}.csv")
+    if d is None:
         return
-    d = np.loadtxt(f, delimiter=",", skiprows=1)
     Zt, Zdet, Zgt = d[:, 1], d[:, 2], d[:, 3]
 
-    fig, ax = plt.subplots(figsize=(6.2, 3.6))
-    for Zp, col, lab in ((Zgt, C_GT, "ground-truth boxes"),
-                         (Zdet, C_DET, f"detector boxes (conf {conf})")):
+    fig, ax = plt.subplots(figsize=(6.4, 3.7))
+    for Zp, col, lab in ((Zgt, C_GT, "annotation boxes"),
+                         (Zdet, C_DET, f"detector boxes (conf {CONF})")):
         rel = 100 * (Zp - Zt) / Zt
-        c, m, lo, hi, n = binned(Zt, rel, RANGE_EDGES)
+        c, m, lo, hi = binned(Zt, rel, RANGE_EDGES)
         ax.fill_between(c, lo, hi, color=col, alpha=0.15, linewidth=0)
         ax.plot(c, m, "o-", color=col, label=lab, markersize=4)
 
     ax.axhline(0, color="black", linewidth=0.8)
-    ax.axhspan(-24, 24, color="#cccccc", alpha=0.2, zorder=0)
     ax.set_xscale("log")
     ax.set_xticks([20, 30, 50, 70, 100])
-    ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.get_xaxis().set_major_formatter(mticker.ScalarFormatter())
     ax.set_xlabel("stereo reference distance (m)")
     ax.set_ylabel("signed distance error (%)")
-    ax.set_title("Ranging error vs range, shaded band = IQR")
+    ax.set_title("Signed ranging error against range\n"
+                 "line = median, band = interquartile range", fontsize=9.5)
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
     fig.savefig(f"{FIG}/error_vs_range.png")
@@ -65,26 +72,37 @@ def fig_error_vs_range(conf=0.25):
 
 # ---------------------------------------------------------------- fig 2
 def fig_size_prior(split="train"):
-    f = f"{RES}/implied_height_{split}.csv"
-    if not os.path.exists(f):
-        print(f"skip fig2: {f} missing")
+    d = load(f"implied_height_{split}.csv")
+    if d is None:
         return
-    d = np.loadtxt(f, delimiter=",", skiprows=1)
     H = d[:, 1]
 
-    fig, ax = plt.subplots(figsize=(6.2, 3.4))
-    ax.hist(H, bins=np.arange(0, 2100, 50), color=C_GT, alpha=0.8)
-    ax.axvline(H_PRIOR_MM, color=C_DET, linewidth=1.8,
-               label=f"prior adopted, {H_PRIOR_MM} mm")
-    for v, lab in ((420, "Größe 1"), (600, "Größe 2"), (750, "Größe 3")):
+    fig, ax = plt.subplots(figsize=(6.4, 3.8))
+    ax.hist(H, bins=np.arange(0, 2100, 50), color=C_GT, alpha=0.85)
+    top = ax.get_ylim()[1]
+
+    ax.axvline(H_PRIOR_MM, color=C_DET, linewidth=2,
+               label=f"prior used: {H_PRIOR_MM} mm")
+
+    # VwV-StVO nominal dimensions are shape dependent, so round and
+    # triangular classes are marked separately rather than as one scale.
+    round_mm = [(420, "1"), (600, "2"), (750, "3")]
+    tri_mm = [(630, "1"), (900, "2"), (1260, "3")]
+    for v, g in round_mm:
         ax.axvline(v, color="black", linestyle=":", linewidth=0.9)
-        ax.text(v, ax.get_ylim()[1] * 0.95, lab, rotation=90,
-                fontsize=7, ha="right", va="top")
-    ax.set_xlabel("physical sign height implied by stereo depth (mm)")
+        ax.text(v, top * 0.97, f"round Gr.{g}", rotation=90, fontsize=6.5,
+                ha="right", va="top")
+    for v, g in tri_mm:
+        ax.axvline(v, color=C_3, linestyle="--", linewidth=0.9, alpha=0.8)
+        ax.text(v, top * 0.55, f"triangle Gr.{g}", rotation=90, fontsize=6.5,
+                ha="right", va="top", color=C_3)
+
+    ax.set_xlabel("physical sign height implied by stereo reference (mm)")
     ax.set_ylabel("signs")
-    ax.set_title(f"Sign height recovered from stereo, {split} split "
-                 f"(n={len(H)})")
-    ax.legend(frameon=False, fontsize=8)
+    ax.set_title(f"Sign height recovered by inverting the ranging equation\n"
+                 f"{split} split, n={len(H)}, near-square boxes >= 30 px",
+                 fontsize=9.5)
+    ax.legend(frameon=False, fontsize=8, loc="upper right")
     fig.tight_layout()
     fig.savefig(f"{FIG}/size_prior.png")
     plt.close(fig)
@@ -92,35 +110,32 @@ def fig_size_prior(split="train"):
 
 
 # ---------------------------------------------------------------- fig 3
-def fig_coverage(conf=0.25):
-    f = f"{RES}/pipeline_val_conf{conf}.csv"
-    if not os.path.exists(f):
-        print(f"skip fig3: {f} missing")
+def fig_coverage():
+    d = load(f"pipeline_test_conf{CONF}.csv")
+    if d is None:
         return
-    d = np.loadtxt(f, delimiter=",", skiprows=1)
     Zt, Zdet = d[:, 1], d[:, 2]
 
-    c, cov, n = [], [], []
+    labels, cov, n = [], [], []
     for a, b in zip(RANGE_EDGES[:-1], RANGE_EDGES[1:]):
         s = (Zt >= a) & (Zt < b)
         if s.sum() < 10:
             continue
-        c.append(np.sqrt(a * b))
+        labels.append(f"{a}\u2013{b}")
         cov.append(100 * np.isfinite(Zdet[s]).mean())
         n.append(int(s.sum()))
 
-    fig, ax = plt.subplots(figsize=(6.2, 3.2))
-    ax.bar(range(len(c)), cov, color=C_GT, alpha=0.85, width=0.65)
+    fig, ax = plt.subplots(figsize=(6.4, 3.3))
+    ax.bar(range(len(cov)), cov, color=C_GT, alpha=0.85, width=0.65)
     for i, (v, k) in enumerate(zip(cov, n)):
         ax.text(i, v + 1.5, f"{v:.0f}%", ha="center", fontsize=8)
         ax.text(i, 3, f"n={k}", ha="center", fontsize=7, color="white")
-    ax.set_xticks(range(len(c)))
-    ax.set_xticklabels([f"{a}\u2013{b}" for a, b in
-                        zip(RANGE_EDGES[:-1], RANGE_EDGES[1:])][:len(c)])
+    ax.set_xticks(range(len(cov)))
+    ax.set_xticklabels(labels)
     ax.set_ylim(0, 105)
     ax.set_xlabel("stereo reference distance (m)")
-    ax.set_ylabel("signs with a distance estimate (%)")
-    ax.set_title(f"Coverage falls with range, conf {conf}")
+    ax.set_ylabel("signs receiving an estimate (%)")
+    ax.set_title(f"Coverage falls with range (conf {CONF})", fontsize=9.5)
     fig.tight_layout()
     fig.savefig(f"{FIG}/coverage_vs_range.png")
     plt.close(fig)
@@ -129,28 +144,72 @@ def fig_coverage(conf=0.25):
 
 # ---------------------------------------------------------------- fig 4
 def fig_operating_point():
-    # measured on cityscapes val, stage4_pipeline_eval.py at three thresholds
-    conf = np.array([0.40, 0.25, 0.10])
-    cover = np.array([64.9, 74.1, 81.1])
-    prec = np.array([0.826, 0.730, 0.560]) * 100
+    d = load("conf_sweep_detval.csv")
+    if d is None:
+        return
+    conf, prec, rec, f1 = d[:, 0], d[:, 1], d[:, 2], d[:, 3]
+    best = int(np.argmax(f1))
 
-    fig, ax = plt.subplots(figsize=(5.4, 3.6))
-    ax.plot(cover, prec, "o-", color=C_GT, markersize=6)
-    for x, y, t in zip(cover, prec, conf):
-        ax.annotate(f"conf {t:.2f}", (x, y), textcoords="offset points",
-                    xytext=(8, 6), fontsize=8)
-    ax.annotate("3.4 FP per sign gained", (69.5, 77.8), fontsize=7.5,
-                color=C_MISS, ha="center")
-    ax.annotate("13.4 FP per sign gained", (77.6, 64.5), fontsize=7.5,
-                color=C_DET, ha="center")
-    ax.set_xlabel("coverage: signs with a distance estimate (%)")
-    ax.set_ylabel("precision (%)")
-    ax.set_title(
-        "Operating point: cost per recovered sign\nquadruples below conf 0.25")
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.5))
+
+    a1.plot(conf, prec, "o-", color=C_GT, ms=4, label="precision")
+    a1.plot(conf, rec, "s-", color=C_DET, ms=4, label="recall")
+    a1.plot(conf, f1, "^-", color=C_3, ms=4, label="F1")
+    a1.axvline(conf[best], color="black", linestyle=":", linewidth=1)
+    a1.annotate(f"selected: {conf[best]:.2f}", (conf[best], 0.30),
+                textcoords="offset points", xytext=(6, 0), fontsize=8)
+    a1.set_xlabel("confidence threshold")
+    a1.set_ylabel("score")
+    a1.set_ylim(0.25, 1.0)
+    a1.set_title("Threshold sweep on detector-val cities", fontsize=9.5)
+    a1.legend(frameon=False, fontsize=8)
+
+    a2.plot(100 * rec, 100 * prec, "o-", color=C_GT, ms=4)
+    for i in range(0, len(conf), 2):
+        a2.annotate(f"{conf[i]:.2f}", (100 * rec[i], 100 * prec[i]),
+                    textcoords="offset points", xytext=(6, 4), fontsize=7)
+    a2.plot(100 * rec[best], 100 * prec[best], "o", color=C_DET, ms=9,
+            markerfacecolor="none", markeredgewidth=2)
+    a2.set_xlabel("recall (%)")
+    a2.set_ylabel("precision (%)")
+    a2.set_title("Precision against recall\ncircled point maximises F1",
+                 fontsize=9.5)
+
     fig.tight_layout()
     fig.savefig(f"{FIG}/operating_point.png")
     plt.close(fig)
     print("wrote operating_point.png")
+
+
+# ---------------------------------------------------------------- fig 5
+def fig_paired():
+    d = load(f"pipeline_test_conf{CONF}.csv")
+    if d is None:
+        return
+    h, Zt, Zdet, Zgt = d[:, 0], d[:, 1], d[:, 2], d[:, 3]
+    m = np.isfinite(Zdet) & (h >= 15)
+    if m.sum() < 30:
+        return
+    dh = 100 * (Zgt[m] / Zdet[m] - 1)       # detector box height vs annotation
+
+    fig, ax = plt.subplots(figsize=(5.6, 3.4))
+    ax.hist(np.clip(dh, -40, 40), bins=np.arange(-40, 41, 2),
+            color=C_DET, alpha=0.85)
+    ax.axvline(0, color="black", linewidth=0.9)
+    med = np.median(np.abs(dh))
+    ax.axvline(med, color=C_GT, linestyle="--", linewidth=1.4,
+               label=f"median |error| = {med:.1f}%")
+    ax.axvline(-med, color=C_GT, linestyle="--", linewidth=1.4)
+    ax.set_xlabel("detector box height error vs annotation (%)")
+    ax.set_ylabel("signs")
+    ax.set_title("What the detector contributes\n"
+                 "dZ/Z = -dh/h, so this is directly a distance error",
+                 fontsize=9.5)
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(f"{FIG}/box_height_error.png")
+    plt.close(fig)
+    print("wrote box_height_error.png")
 
 
 if __name__ == "__main__":
@@ -158,3 +217,4 @@ if __name__ == "__main__":
     fig_size_prior()
     fig_coverage()
     fig_operating_point()
+    fig_paired()
