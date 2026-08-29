@@ -249,5 +249,3 @@ python tools/stage3b_conf_sweep.py path/to/best.pt
 python tools/stage4_pipeline_eval.py path/to/best.pt 0.30
 
 # paired comparison and figures
-python tools/paired_compare.py 0.3
-python tools/figures.py 0.3
