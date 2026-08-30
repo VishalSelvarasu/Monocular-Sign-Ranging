@@ -55,14 +55,19 @@ def fig_error_vs_range():
         ax.fill_between(c, lo, hi, color=col, alpha=0.15, linewidth=0)
         ax.plot(c, m, "o-", color=col, label=lab, markersize=4)
 
+    # Legend entry for the shaded uncertainty band. The actual bands above
+    # retain each series colour; this neutral proxy explains their meaning.
+    ax.fill_between([], [], [], color="gray", alpha=0.2,
+                    label="interquartile range")
+
     ax.axhline(0, color="black", linewidth=0.8)
     ax.set_xscale("log")
     ax.set_xticks([20, 30, 50, 70, 100])
     ax.get_xaxis().set_major_formatter(mticker.ScalarFormatter())
+    ax.get_xaxis().set_minor_formatter(mticker.NullFormatter())
     ax.set_xlabel("stereo reference distance (m)")
     ax.set_ylabel("signed distance error (%)")
-    ax.set_title("Signed ranging error against range\n"
-                 "line = median, band = interquartile range", fontsize=9.5)
+    ax.set_title("Signed ranging error against range")
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
     fig.savefig(f"{FIG}/error_vs_range.png")
@@ -77,31 +82,24 @@ def fig_size_prior(split="train"):
         return
     H = d[:, 1]
 
-    fig, ax = plt.subplots(figsize=(6.4, 3.8))
+    fig, ax = plt.subplots(figsize=(6.4, 3.6))
     ax.hist(H, bins=np.arange(0, 2100, 50), color=C_GT, alpha=0.85)
     top = ax.get_ylim()[1]
 
     ax.axvline(H_PRIOR_MM, color=C_DET, linewidth=2,
                label=f"prior used: {H_PRIOR_MM} mm")
 
-    # VwV-StVO nominal dimensions are shape dependent, so round and
-    # triangular classes are marked separately rather than as one scale.
-    round_mm = [(420, "1"), (600, "2"), (750, "3")]
-    tri_mm = [(630, "1"), (900, "2"), (1260, "3")]
-    for v, g in round_mm:
+    # Round-sign diameters only. VwV-StVO triangle figures are side
+    # lengths, not vertical extents, so they do not belong on this axis.
+    for v in (420, 600, 750):
         ax.axvline(v, color="black", linestyle=":", linewidth=0.9)
-        ax.text(v, top * 0.97, f"round Gr.{g}", rotation=90, fontsize=6.5,
-                ha="right", va="top")
-    for v, g in tri_mm:
-        ax.axvline(v, color=C_3, linestyle="--", linewidth=0.9, alpha=0.8)
-        ax.text(v, top * 0.55, f"triangle Gr.{g}", rotation=90, fontsize=6.5,
-                ha="right", va="top", color=C_3)
+        ax.text(v, top * 0.98, f"{v}", fontsize=7, ha="right", va="top")
+    ax.text(0.98, 0.70, "dotted: nominal round-sign\ndiameters (VwV-StVO)",
+            transform=ax.transAxes, fontsize=7.5, ha="right", va="top")
 
     ax.set_xlabel("physical sign height implied by stereo reference (mm)")
     ax.set_ylabel("signs")
-    ax.set_title(f"Sign height recovered by inverting the ranging equation\n"
-                 f"{split} split, n={len(H)}, near-square boxes >= 30 px",
-                 fontsize=9.5)
+    ax.set_title(f"Implied sign height, {split} split (n={len(H)})")
     ax.legend(frameon=False, fontsize=8, loc="upper right")
     fig.tight_layout()
     fig.savefig(f"{FIG}/size_prior.png")
@@ -135,7 +133,7 @@ def fig_coverage():
     ax.set_ylim(0, 105)
     ax.set_xlabel("stereo reference distance (m)")
     ax.set_ylabel("signs receiving an estimate (%)")
-    ax.set_title(f"Coverage falls with range (conf {CONF})", fontsize=9.5)
+    ax.set_title(f"Coverage falls with range (conf {CONF})")
     fig.tight_layout()
     fig.savefig(f"{FIG}/coverage_vs_range.png")
     plt.close(fig)
@@ -161,7 +159,7 @@ def fig_operating_point():
     a1.set_xlabel("confidence threshold")
     a1.set_ylabel("score")
     a1.set_ylim(0.25, 1.0)
-    a1.set_title("Threshold sweep on detector-val cities", fontsize=9.5)
+    a1.set_title("Threshold sweep on detector-val cities")
     a1.legend(frameon=False, fontsize=8)
 
     a2.plot(100 * rec, 100 * prec, "o-", color=C_GT, ms=4)
@@ -172,8 +170,7 @@ def fig_operating_point():
             markerfacecolor="none", markeredgewidth=2)
     a2.set_xlabel("recall (%)")
     a2.set_ylabel("precision (%)")
-    a2.set_title("Precision against recall\ncircled point maximises F1",
-                 fontsize=9.5)
+    a2.set_title("Precision against recall")
 
     fig.tight_layout()
     fig.savefig(f"{FIG}/operating_point.png")
@@ -193,7 +190,17 @@ def fig_paired():
     dh = 100 * (Zgt[m] / Zdet[m] - 1)       # detector box height vs annotation
 
     fig, ax = plt.subplots(figsize=(5.6, 3.4))
-    ax.hist(np.clip(dh, -40, 40), bins=np.arange(-40, 41, 2),
+
+    # Keep a wider visible range so large detector box-height errors are not
+    # artificially piled up at +/-40%. Values beyond +/-60% are still clipped
+    # to the boundary, so report their counts explicitly in the console.
+    lo_tail = int(np.sum(dh < -60))
+    hi_tail = int(np.sum(dh > 60))
+    if lo_tail or hi_tail:
+        print(f"  box-height tail beyond plot range: {lo_tail} < -60%, "
+              f"{hi_tail} > +60%")
+
+    ax.hist(np.clip(dh, -80, 80), bins=np.arange(-80, 81, 4),
             color=C_DET, alpha=0.85)
     ax.axvline(0, color="black", linewidth=0.9)
     med = np.median(np.abs(dh))
@@ -202,9 +209,7 @@ def fig_paired():
     ax.axvline(-med, color=C_GT, linestyle="--", linewidth=1.4)
     ax.set_xlabel("detector box height error vs annotation (%)")
     ax.set_ylabel("signs")
-    ax.set_title("What the detector contributes\n"
-                 "dZ/Z = -dh/h, so this is directly a distance error",
-                 fontsize=9.5)
+    ax.set_title("Detector box height error")
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
     fig.savefig(f"{FIG}/box_height_error.png")
