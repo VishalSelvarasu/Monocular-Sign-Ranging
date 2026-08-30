@@ -1,19 +1,21 @@
 # Monocular Sign Ranging
 
+![Ranging geometry](figures/ranging_geometry.png)
+
 Estimating how far away a traffic sign is, from one image of a calibrated camera, using the fact that German traffic signs are manufactured in standard sizes.
 
 Validated against Cityscapes stereo disparity. Cityscapes is used under its non-commercial licence and is not redistributed here; please cite Cordts et al., *The Cityscapes Dataset for Semantic Urban Scene Understanding*, CVPR 2016.
 
 > [!IMPORTANT]
-> Results come from the Cityscapes **val** split (frankfurt, lindau, munster), which was held out from all fitting and tuning. The size prior was fitted on train cities; the detector was trained on 15 train cities with its checkpoint and confidence threshold both selected on 3 further train cities. Earlier development runs did evaluate on val — those results were discarded and are documented at the end.
+> Results come from the Cityscapes **val** split (frankfurt, lindau, munster), which was held out from all fitting and tuning. The size prior was fitted on train cities. The detector was trained on 15 train cities, with its checkpoint and confidence threshold both selected on 3 further train cities. Earlier development runs did evaluate on val. Those results were discarded and are documented at the end.
 
-Distance requires known camera intrinsics, so this is single-image ranging from a **calibrated** camera, not from an arbitrary photograph. Stereo is used only as an offline evaluation reference; inference needs one left-camera image and `fy`.
+Distance requires known camera intrinsics, so this is single-image ranging from a **calibrated** camera, not from an arbitrary photograph. Stereo is used only as an offline evaluation reference. Inference needs one left-camera image and `fy`.
 
 ## Result
 
 Confidence 0.30, one-to-one matching at IoU 0.5.
 
-**Evaluation population**: annotated `traffic sign` polygons whose axis-aligned box is at least 15 px in height, at least 8 px in width, near-square (|w/h − 1| < 0.25), with at least 20% valid disparity inside the box and a stereo reference between 2 and 250 m. Rectangular direction signs and Zusatzzeichen are therefore excluded, since they have no standard height. That leaves **1,480 signs across 500 images**.
+**Evaluation population**: annotated `traffic sign` polygons whose axis-aligned box is at least 15 px in height, at least 8 px in width, near-square (|w/h − 1| < 0.25), with at least 20% valid disparity inside the box and a stereo reference between 2 and 250 m. Rectangular direction signs and Zusatzzeichen are excluded, since they have no standard height. That leaves **1,480 signs across 500 images**.
 
 | | Value |
 |---|---|
@@ -26,7 +28,7 @@ Confidence 0.30, one-to-one matching at IoU 0.5.
 
 ![Ranging error against range](figures/error_vs_range.png)
 
-Stratified by stereo reference range. `MdARE det` covers signs the detector found; `MdARE all` scores a miss as infinite error. `H det` is the median physical height that the *detected* signs in that stratum actually turn out to have.
+Stratified by stereo reference range. `MdARE det` covers signs the detector found. `MdARE all` scores a miss as infinite error. `H det` is the median physical height that the *detected* signs in that stratum actually turn out to have.
 
 | Range | Signs | Coverage | H all | H det | Bias | p25 | p75 | MdARE det | 95% CI | MdARE all |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -37,25 +39,23 @@ Stratified by stereo reference range. `MdARE det` covers signs the detector foun
 | 70–100 m | 303 | 63.4% | 650 mm | 682 mm | −8.8% | −22% | +7% | 16.7% | [14.9, 20.1] | 33.3% |
 | 100–150 m | 212 | 49.1% | 785 mm | 823 mm | −23.9% | −37% | −11% | 24.2% | [21.6, 27.9] | undefined |
 
-Confidence intervals come from a 2,000-sample bootstrap over individual signs. Signs within an image are correlated, so these are optimistic; an image-clustered bootstrap would widen them.
+Confidence intervals come from a 2,000-sample bootstrap over individual signs. Signs within an image are correlated, so these are optimistic. An image-clustered bootstrap would widen them.
 
 ## Why the error looks like this
 
-The bias column is not noise, and it is not a property of the estimator. With annotation boxes and a fixed prior $H_0$, the error reduces exactly to
+The bias column is not noise. With annotation boxes and a fixed prior $H_0$, the error reduces exactly to
 
 $$
 \frac{Z_{\text{pred}}}{Z_{\text{true}}} - 1 = \frac{H_0}{H_{\text{actual}}} - 1
 $$
 
-Distance error depends on one thing: how wrong the assumed physical height is for that particular sign. Check the 15–25 m row against `H det` — 650/560 − 1 = +16.1%, against +16.7% measured. The residual is detector box-height error, which breaks exactness once predicted boxes replace annotation ones. The identity is exact in the geometry-only stage.
+Distance error depends on one thing: how wrong the assumed physical height is for that particular sign. Check the 15–25 m row against `H det`. 650/560 − 1 = +16.1%, against +16.7% measured. The residual is detector box-height error, which breaks exactness once predicted boxes replace annotation ones. The identity is exact in the geometry-only stage.
 
-So the bias trend is a statement about German roads, not about the pipeline. Signs near the camera have a median height of 560 mm; signs beyond 100 m, 823 mm. Small signs sit close to the carriageway and are only annotated when nearby. Large signs — motorway plates, multi-plate assemblies — are legible and annotated from far off. A single 650 mm prior is therefore too large near and too small far, and the bias crosses zero around 60 m where the population's median height passes the prior.
+So the bias trend says something about German roads rather than about the pipeline. Signs near the camera have a median height of 560 mm; signs beyond 100 m, 823 mm. Small signs sit close to the carriageway and only get annotated when nearby. Large signs (motorway plates, multi-plate assemblies) stay legible and annotated from far off. A single 650 mm prior is too large near and too small far, and the bias crosses zero around 60 m where the population's median height passes the prior.
 
 **Error is not flat with range.** It runs 32.4% at 15–25 m down to 16.7% at 70–100 m, then back to 24.2% past 100 m. Accuracy is worst close to the vehicle, which is where an assistance system needs it most.
 
-`H det` exceeds `H all` in every single range bin. Within a fixed range band, the detector systematically misses the smaller signs. That is a selection effect on physical sign size, not only on range, and it flatters the detected-subset error relative to what a complete system would produce.
-
-An earlier version of this README stratified by box height in pixels and reported a roughly flat error. That is misleading: requiring a 60 px box at 18 m implicitly requires a sign taller than 490 mm, so binning on box height selects on the very quantity that causes the error. The box-height view is kept below for comparison.
+An earlier version of this README stratified by box height in pixels and reported a roughly flat error. That is misleading. Requiring a 60 px box at 18 m implicitly requires a sign taller than 490 mm, so binning on box height selects on the very quantity that causes the error. The box-height view is kept below for comparison.
 
 | Box height | Signs | Coverage | H det | Bias | MdARE det | MdARE all |
 |---|---:|---:|---:|---:|---:|---:|
@@ -64,11 +64,11 @@ An earlier version of this README stratified by box height in pixels and reporte
 | 30–60 px | 527 | 89.0% | 629 mm | +1.6% | 24.0% | 29.7% |
 | 60+ px | 223 | 92.4% | 751 mm | −12.4% | 22.2% | 24.0% |
 
-Three of its four bins have nearly identical implied heights (600 / 612 / 629 mm), compressing the real trend into the last bin and making the error look range-independent.
+Three of its four bins have nearly identical implied heights (600 / 612 / 629 mm). That compresses the real trend into the last bin and makes the error look range-independent.
 
 ## Does the detector cost accuracy?
 
-Measured on identical signs rather than inferred from two similar-looking tables.
+Measured on identical signs, rather than inferred from two similar-looking tables.
 
 | Range | n | MdARE, annotation box | MdARE, detector box | Paired difference | 95% CI |
 |---|---:|---:|---:|---:|---:|
@@ -80,27 +80,29 @@ Measured on identical signs rather than inferred from two similar-looking tables
 | 100–150 m | 64 | 29.0% | 33.5% | −0.27% | [−1.46, +1.94] |
 | **all ≥15 px** | **1,185** | **22.08%** | **23.04%** | **+0.04%** | **[−0.28, +0.33]** |
 
-The paired difference is the per-sign change in absolute error when the detector box replaces the annotation box. Every interval includes zero, so **no statistically resolvable median difference was observed** — which is weaker than saying there is none.
+The paired difference is the per-sign change in absolute error when the detector box replaces the annotation box. Every interval includes zero, so **no statistically resolvable median difference was observed**. That is weaker than saying there is none.
 
-Not because the boxes are perfect. Detector box heights differ from annotation heights by **4.16%** in median absolute terms.
+The boxes are not perfect, though. Detector box heights differ from annotation heights by **4.16%** in median absolute terms.
 
 ![Detector box height error](figures/box_height_error.png)
 
-Since $\Delta Z / Z \approx -\Delta h / h$, that is a real 4.2% contribution to distance error, and it is invisible in the totals because it sits underneath a size-prior error five times larger. The paired test, not any error-combination argument, is what establishes this.
+Since $\Delta Z / Z \approx -\Delta h / h$, that is a real 4.2% contribution to distance error. It stays invisible in the totals because it sits underneath a size-prior error five times larger. The paired test, not any error-combination argument, is what establishes this.
 
-So the size prior, not box regression, is what limits this system. Effort spent on better localisation is wasted until the prior is fixed.
+The distribution is heavy-tailed: p95 is 24.6% and p99 is 53.9%, so about 1% of detections produce distances wrong by more than half. The median is not a bound.
+
+The size prior, not box regression, limits this system. Effort spent on better localisation is wasted until the prior is fixed.
 
 ## What detection actually costs
 
 ![Coverage against range](figures/coverage_vs_range.png)
 
-Coverage, not accuracy. One sign in five produces no estimate, and the misses are concentrated: 88.6% coverage at 15–25 m falls to 49.1% beyond 100 m.
+Coverage, not accuracy. One sign in five produces no estimate, and the misses cluster: 88.6% coverage at 15–25 m falls to 49.1% beyond 100 m.
 
 The `MdARE all` column makes it visible. At 35–50 m it reads 31.1% against 22.3% for the detected subset. The gap is the cost of signs never seen at all.
 
 ## How I got here
 
-The first plan was a GTSDB detector plus Depth Anything V2, with `near`/`mid`/`far` outputs. I dropped that because the relative-depth output normalises per image: the same predicted value means different real distances in different frames, so a `near` in one frame can be further away than a `mid` in another.
+The first plan was a GTSDB detector plus Depth Anything V2, with `near`/`mid`/`far` outputs. I dropped that because the relative-depth output normalises per image. The same predicted value means different real distances in different frames, so a `near` in one frame can be further away than a `mid` in another.
 
 Depth Anything V2 does also ship **metric** depth variants, fine-tuned on Virtual KITTI 2 for outdoor scenes. I did not benchmark those, so a calibrated monocular-depth baseline is a missing comparison rather than a ruled-out option.
 
@@ -118,7 +120,7 @@ I also built it backwards on purpose: geometry first with annotation boxes, dete
 
 Cityscapes disparity is a precomputed stereo estimate, not laser ground truth, so it is called the **stereo reference** throughout. It carries its own error, worst at small disparity.
 
-The specific worry is contamination: a sign is a thin plate, often against sky, and the median disparity inside its bounding box might be picking up background. As a sensitivity check I compared median disparity against the 90th percentile, which corresponds to the nearer surface and is less affected by distant background.
+The specific worry is contamination. A sign is a thin plate, often against sky, and the median disparity inside its bounding box might be picking up background. As a sensitivity check I compared median disparity against the 90th percentile, which corresponds to the nearer surface and is less affected by distant background.
 
 The gap is 2–4%, largest on the smallest boxes (3.9% below 15 px, 2.0% above 60 px). That direction is consistent with some boundary contamination, since a small box has proportionally more edge. The magnitude is an order below the ranging error being measured, so contamination at this level would not change any conclusion here. This is a sensitivity check, not a proof that contamination is absent.
 
@@ -134,14 +136,14 @@ Inverting the ranging equation on 991 near-square train signs at least 30 px hig
 
 The main peak at 600–700 mm is a useful check on the whole chain. If the disparity decode, baseline or focal length were wrong, that peak would sit at an arbitrary value rather than near a documented standard.
 
-Reading size classes off this histogram is harder than it looks. German sign dimensions are **shape-dependent**, and the VwV-StVO figures are not all vertical heights: Größe 2 is 600 mm diameter for round signs, but 900 mm *side length* for triangles, which is 779 mm of vertical extent. The near-square subset mixes circles, squares and triangles, so the spread reflects mixed geometry as well as mixed size classes. The model uses $H_{\text{real}} = 0.650\text{ m}$: one empirical central value across all of them.
+Reading size classes off this histogram is harder than it looks. German sign dimensions are **shape-dependent**, and the VwV-StVO figures are not all vertical heights. Größe 2 is 600 mm diameter for round signs, but 900 mm *side length* for triangles, which is 779 mm of vertical extent. The near-square subset mixes circles, squares and triangles, so the spread reflects mixed geometry as well as mixed size classes. The model uses $H_{\text{real}} = 0.650\text{ m}$, one empirical central value across all of them.
 
 Re-deriving on val gives 641 mm, so the prior transfers. Val produces a wider spread because its distribution is more bimodal: 17.7% of clean val signs sit in the 400–500 mm bin against 13.1% on train.
 
 **The floor this sets.** For the observed IQR:
 
-- actual height 574 mm → distance error **+13.2%**
-- actual height 842 mm → distance error **−22.8%**
+- actual height 574 mm gives distance error **+13.2%**
+- actual height 842 mm gives distance error **−22.8%**
 
 Roughly **−23% to +13%**, a 36-point interval, before a single pixel is measured. Measured signed IQRs run from 53 points at 15–25 m down to 26 points at 100–150 m, straddling that estimate. The inferred-height distribution also carries stereo error, sign orientation and annotation imprecision, so this is an estimate rather than a clean decomposition.
 
@@ -149,11 +151,11 @@ Roughly **−23% to +13%**, a 36-point interval, before a single pixel is measur
 
 Single-class YOLO11s at `imgsz=1280`, trained on 15 Cityscapes cities (2,465 images, 17,869 boxes). Three more train cities are held out for checkpoint and threshold selection.
 
-Resolution matters more than anything else here. Cityscapes is 2048×1024 and the median sign is 22 px on its short side. At the usual `imgsz=640` that sign scales to roughly 7 px, below the finest stride-8 feature spacing, making localisation and classification substantially harder. At 1280 it is 13.8 px.
+Resolution matters more than anything else here. Cityscapes is 2048×1024 and the median sign is 22 px on its short side. At the usual `imgsz=640` that sign scales to roughly 7 px, below the finest stride-8 feature spacing, which makes localisation and classification substantially harder. At 1280 it is 13.8 px.
 
 Ultralytics-reported metrics on the detector-validation cities: precision 0.769, recall 0.676, mAP@50 0.767, mAP@50-95 0.485. My own evaluation on those cities gives lower numbers because it uses strict one-to-one matching and includes images with no annotated sign.
 
-The detector was trained only on images containing at least one retained sign. Background-only frames were excluded, which may worsen false-positive behaviour; retraining with negatives is an untested improvement.
+The detector was trained only on images containing at least one retained sign. Background-only frames were excluded, which may worsen false-positive behaviour. Retraining with negatives is an untested improvement.
 
 ## Choosing the confidence threshold
 
@@ -192,13 +194,13 @@ Relaxing the match criterion, with the full one-to-one assignment recomputed fro
 
 769 of 919 false positives, **84%**, overlap no unclaimed annotated sign even at IoU 0.1. Only 150 are explicable as poor localisation on a real sign. Duplicate detections on an already-matched sign remain false positives at every threshold, as they should.
 
-Strict precision is 0.730. The 0.774 at IoU 0.1 is precision under a different matching rule, not a corrected value; attributing the difference to annotation ambiguity would require inspecting the false-positive crops, which has not been done.
+Strict precision is 0.730. The 0.774 at IoU 0.1 is precision under a different matching rule, not a corrected value. Attributing the difference to annotation ambiguity would require inspecting the false-positive crops, which has not been done.
 
 False-positive box heights track the real sign distribution closely, so a simple box-height or range threshold is unlikely to separate them.
 
 ## What is excluded and why
 
-Signs below 15 px box height get coverage but no headline error figure. At that size the predicted range exceeds 100 m and stereo disparity falls below about 5 px, where the reference carries more uncertainty than the estimate under test. The threshold is stated on box height, an observable image quantity, not on true distance — a distance-based cutoff would select on the reference side only and bias the comparison.
+Signs below 15 px box height get coverage but no headline error figure. At that size the predicted range exceeds 100 m and stereo disparity falls below about 5 px, where the reference carries more uncertainty than the estimate under test. The threshold is stated on box height, an observable image quantity, not on true distance. A distance-based cutoff would select on the reference side only and bias the comparison.
 
 Boxes below 8 px in either dimension are dropped from every stage, matching the floor used when building detector labels. That floor also means small signs are structurally absent from the far bins: at 100–150 m, 8 px corresponds to about 430 mm of physical height.
 
@@ -224,7 +226,7 @@ Every one produced numbers that looked entirely reasonable. None was caught by a
 
 ## Where this stands
 
-Every number is measured on data held out from all fitting and tuning, with confidence intervals, on one explicitly defined population, and each stratum's bias is checkable against its implied sign height. As a characterised instrument it is honest. As a system it is unfinished.
+Every number is measured on data held out from all fitting and tuning, with confidence intervals, on one explicitly defined population. Each stratum's bias is checkable against its implied sign height. As a characterised instrument it is honest. As a system it is unfinished.
 
 The size prior is the ceiling, and the range table shows where it hurts: 32.4% error at 15–25 m against 16.7% at 70–100 m, because the near population is dominated by signs smaller than 650 mm. Shape and size-class priors would attack exactly that. Doing so needs sign type, which Cityscapes does not label, while GTSDB has type but no depth.
 
@@ -261,6 +263,7 @@ python tools/stage4_pipeline_eval.py path/to/best.pt 0.30
 # paired comparison and figures
 python tools/paired_compare.py 0.3
 python tools/figures.py 0.3
+python tools/ranging_geometry.py
 ```
 
-Hardware: RTX 4060 Laptop, 8 GB. Training ran about 2.5 min/epoch at imgsz 1280 batch 4, stopping at epoch 78 of 100 with patience 20. Dependency versions in `requirements.txt`; note that `torch` is a CUDA 12.4 build and needs the PyTorch index rather than plain PyPI.
+Hardware: RTX 4060 Laptop, 8 GB. Training ran about 2.5 min/epoch at imgsz 1280 batch 4, stopping at epoch 78 of 100 with patience 20. Dependency versions in `requirements.txt`. Note that `torch` is a CUDA 12.4 build and needs the PyTorch index rather than plain PyPI.
