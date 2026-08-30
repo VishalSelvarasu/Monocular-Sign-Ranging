@@ -1,7 +1,5 @@
 # Monocular Sign Ranging
 
-![Ranging geometry](figures/ranging_geometry.png)
-
 Estimating how far away a traffic sign is, from one image of a calibrated camera, using the fact that German traffic signs are manufactured in standard sizes.
 
 Validated against Cityscapes stereo disparity. Cityscapes is used under its non-commercial licence and is not redistributed here; please cite Cordts et al., *The Cityscapes Dataset for Semantic Urban Scene Understanding*, CVPR 2016.
@@ -10,6 +8,10 @@ Validated against Cityscapes stereo disparity. Cityscapes is used under its non-
 > Results come from the Cityscapes **val** split (frankfurt, lindau, munster), which was held out from all fitting and tuning. The size prior was fitted on train cities. The detector was trained on 15 train cities, with its checkpoint and confidence threshold both selected on 3 further train cities. Earlier development runs did evaluate on val. Those results were discarded and are documented at the end.
 
 Distance requires known camera intrinsics, so this is single-image ranging from a **calibrated** camera, not from an arbitrary photograph. Stereo is used only as an offline evaluation reference. Inference needs one left-camera image and `fy`.
+
+
+![Ranging geometry](figures/ranging_geometry.png)
+
 
 ## Result
 
