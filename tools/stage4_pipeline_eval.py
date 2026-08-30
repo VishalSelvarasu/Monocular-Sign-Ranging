@@ -7,13 +7,13 @@ from PIL import Image
 from ultralytics import YOLO
 
 ROOT, H_PRIOR = "data", 0.650
-SPLIT = "val"                         # cityscapes val = held-out test set
+SPLIT = "val"
 WEIGHTS = sys.argv[1] if len(sys.argv) > 1 else \
     "runs/detect/runs/cs_1280_clean-2/weights/best.pt"
 CONF = float(sys.argv[2]) if len(sys.argv) > 2 else 0.30
 IOU_MATCH = 0.5
 MIN_GT_PX = 8
-MIN_EVAL_PX = 15                      # headline population floor
+MIN_EVAL_PX = 15
 BOOT = 2000
 rng = np.random.default_rng(0)
 
@@ -39,11 +39,34 @@ def iou_matrix(gt, pr):
     return inter / np.clip(ag + ap - inter, 1e-9, None)
 
 
-rows = []          # (gt_h, Z_true, Z_pred_det, Z_pred_gt)
-n_img = n_empty = 0
-tp = fp = 0
-n_gt_det = 0
-fp_best_iou = []
+def match(M, thr):
+    """confidence-ordered one-to-one matching.
+
+    M is (n_gt, n_pred) with predictions already sorted by descending
+    confidence. Returns (claimed, n_tp, n_fp) where claimed[i] is the
+    prediction index matched to gt i, or -1.
+    """
+    n_gt, n_pr = M.shape
+    claimed = np.full(n_gt, -1, dtype=int)
+    tp = fp = 0
+    for j in range(n_pr):
+        if n_gt == 0:
+            fp += 1
+            continue
+        col = M[:, j].copy()
+        col[claimed >= 0] = -1.0
+        i = int(np.argmax(col))
+        if col[i] >= thr:
+            claimed[i] = j
+            tp += 1
+        else:
+            fp += 1
+    return claimed, tp, fp
+
+
+frames = []        # (M, gt_boxes, pr, image key) kept for re-matching
+rows = []
+n_img = n_empty = n_gt_det = 0
 
 for city in CITIES:
     for pf in sorted(glob.glob(f"{ROOT}/gtFine/{SPLIT}/{city}/*_polygons.json")):
@@ -56,11 +79,10 @@ for city in CITIES:
 
         meta = json.load(open(pf))
         W, H = meta["imgWidth"], meta["imgHeight"]
-        objs = [o for o in meta["objects"] if o["label"] == "traffic sign"]
-
-        gt_boxes = []
-        seen = set()
-        for o in objs:
+        gt_boxes, seen = [], set()
+        for o in meta["objects"]:
+            if o["label"] != "traffic sign":
+                continue
             p = np.array(o["polygon"], dtype=float)
             x0, y0 = np.floor(p.min(0)).astype(int)
             x1, y1 = np.ceil(p.max(0)).astype(int)
@@ -87,18 +109,8 @@ for city in CITIES:
 
         G = np.array(gt_boxes).reshape(-1, 4)
         M = iou_matrix(G, pr)
-        claimed = np.full(len(G), -1, dtype=int)
-        for j in range(len(pr)):
-            col = M[:, j].copy() if len(G) else np.zeros(0)
-            if len(col):
-                col[claimed >= 0] = 0.0
-            i = int(np.argmax(col)) if len(col) else -1
-            if len(col) and col[i] >= IOU_MATCH:
-                claimed[i] = j
-                tp += 1
-            else:
-                fp += 1
-                fp_best_iou.append(float(col[i]) if len(col) else 0.0)
+        frames.append(M)
+        claimed, _, _ = match(M, IOU_MATCH)
 
         if not gt_boxes:
             continue
@@ -135,10 +147,17 @@ for city in CITIES:
 r = np.array(rows)
 h_px, Zt, Zd, Zg = r[:, 0], r[:, 1], r[:, 2], r[:, 3]
 found = np.isfinite(Zd)
-H_imp = 1000.0 * H_PRIOR * Zt / Zg     # exact, avoids hardcoding fy
+H_imp = 1000.0 * H_PRIOR * Zt / Zg
 
+# detection metrics at the operating threshold
+tp = fp = 0
+for M in frames:
+    _, a, b_ = match(M, IOU_MATCH)
+    tp += a
+    fp += b_
 prec = tp / max(tp + fp, 1)
 rec = tp / max(n_gt_det, 1)
+
 print(f"\nweights={os.path.basename(WEIGHTS)}  conf={CONF}  "
       f"match IoU={IOU_MATCH}")
 print(f"images={n_img} ({n_empty} with no annotated sign)")
@@ -148,14 +167,19 @@ print(f"detection, all annotated signs: TP={tp} FP={fp} "
 print(f"ranging population (near-square, valid disparity): n={len(r)}  "
       f"detected={found.sum()} ({100*found.mean():.1f}%)")
 
-if fp_best_iou:
-    fb = np.array(fp_best_iou)
-    print("\nfalse positives vs match threshold "
-          "(same predictions, relaxed criterion):")
-    for t in (0.5, 0.4, 0.3, 0.2, 0.1):
-        n_fp_t = int((fb < t).sum())
-        print(f"  IoU>={t:.1f}  FP={n_fp_t:<5} "
-              f"precision={tp/max(tp+n_fp_t, 1):.3f}")
+# ---- relaxed-IoU sensitivity, rematched from scratch each time ---------
+print("\nmatch-threshold sensitivity (full rematch at each threshold):")
+print(f"{'IoU':>6}{'TP':>8}{'FP':>8}{'precision':>11}{'recall':>9}")
+for t in (0.5, 0.4, 0.3, 0.2, 0.1):
+    ttp = tfp = 0
+    for M in frames:
+        _, a, b_ = match(M, t)
+        ttp += a
+        tfp += b_
+    print(f"{t:>6.1f}{ttp:>8}{tfp:>8}"
+          f"{ttp/max(ttp+tfp, 1):>11.3f}{ttp/max(n_gt_det, 1):>9.3f}")
+print("a prediction counted FP at IoU 0.1 overlaps no unclaimed annotated")
+print("sign at all; duplicates on an already-matched sign stay FP throughout")
 
 
 def boot_ci(x, stat, n=BOOT):
@@ -168,7 +192,7 @@ rel[found] = (Zd[found] - Zt[found]) / Zt[found]
 
 
 def table(bins, key, label):
-    hdr = (f"{label:<12}{'n':>6}{'coverage':>10}{'med H_imp':>11}"
+    hdr = (f"{label:<12}{'n':>6}{'cover':>8}{'H all':>9}{'H det':>9}"
            f"{'bias':>9}{'p25':>8}{'p75':>8}{'MdARE det':>11}"
            f"{'95% CI':>18}{'MdARE all':>11}")
     print(hdr)
@@ -181,16 +205,18 @@ def table(bins, key, label):
         big = hi >= 9999
         lbl = f"{lo}-{'+' if big else hi}"
         a = np.median(np.abs(rel[m]))
-        a_s = "undefined" if not np.isfinite(a) else f"{100*a:.1f}%"
+        a_s = "undef" if not np.isfinite(a) else f"{100*a:.1f}%"
+        h_all = f"{np.median(H_imp[m]):.0f}"
+        h_det = f"{np.median(H_imp[md]):.0f}" if md.sum() else "-"
         if md.sum() < 10:
-            print(f"{lbl:<12}{m.sum():>6}{100*md.sum()/m.sum():>9.1f}%"
-                  f"{np.median(H_imp[m]):>9.0f}mm{'':>9}{'':>8}{'':>8}"
+            print(f"{lbl:<12}{m.sum():>6}{100*md.sum()/m.sum():>7.1f}%"
+                  f"{h_all:>7}mm{h_det:>7}mm{'':>9}{'':>8}{'':>8}"
                   f"{'n/a':>11}{'':>18}{a_s:>11}")
             continue
         e = rel[md]
         lo_ci, hi_ci = boot_ci(e, lambda x: 100 * np.median(np.abs(x)))
-        print(f"{lbl:<12}{m.sum():>6}{100*md.sum()/m.sum():>9.1f}%"
-              f"{np.median(H_imp[m]):>9.0f}mm"
+        print(f"{lbl:<12}{m.sum():>6}{100*md.sum()/m.sum():>7.1f}%"
+              f"{h_all:>7}mm{h_det:>7}mm"
               f"{100*np.median(e):>8.1f}%"
               f"{100*np.percentile(e, 25):>7.0f}%"
               f"{100*np.percentile(e, 75):>7.0f}%"
@@ -200,6 +226,8 @@ def table(bins, key, label):
 
 
 print("\nstratified by stereo reference range (primary):")
+print("H all = median implied height over all signs in the stratum")
+print("H det = same over detected signs only; bias is measured on these\n")
 table(Z_BINS, Zt, "range (m)")
 
 print("stratified by box height (secondary, conditions on the error "
@@ -210,7 +238,8 @@ m = h_px >= MIN_EVAL_PX
 md = m & found
 e = rel[md]
 lo_ci, hi_ci = boot_ci(e, lambda x: 100 * np.median(np.abs(x)))
-print(f"headline population, gt box height >= {MIN_EVAL_PX} px:")
+print(f"headline population, gt box height >= {MIN_EVAL_PX} px, near-square, "
+      f"valid disparity:")
 print(f"  signs={m.sum()}  coverage={100*md.sum()/m.sum():.1f}%")
 print(f"  MdARE on detected={100*np.median(np.abs(e)):.1f}% "
       f"[95% CI {lo_ci:.1f}, {hi_ci:.1f}]")
@@ -220,10 +249,8 @@ print(f"  signed bias={100*np.median(e):+.1f}%  "
 print(f"  range={np.percentile(Zt[m], 5):.0f}-"
       f"{np.percentile(Zt[m], 95):.0f} m")
 
-# detector box height error, on the headline population
 dh = 100 * (Zg[md] / Zd[md] - 1)
-print(f"\ndetector box height vs annotation, on detected signs >= "
-      f"{MIN_EVAL_PX} px:")
+print(f"\ndetector box height vs annotation, detected >= {MIN_EVAL_PX} px:")
 print(f"  median {np.median(dh):+.2f}%   |median| "
       f"{np.median(np.abs(dh)):.2f}%   "
       f"IQR [{np.percentile(dh, 25):+.1f}, {np.percentile(dh, 75):+.1f}]")

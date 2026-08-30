@@ -19,8 +19,10 @@ PIPE_TEST = sorted(os.listdir(f"{ROOT}/gtFine/val"))   # held out entirely
 def build(name, src_split, cities):
     im_dir = f"{OUT}/images/{name}"
     lb_dir = f"{OUT}/labels/{name}"
-    os.makedirs(im_dir, exist_ok=True)
-    os.makedirs(lb_dir, exist_ok=True)
+    for d in (im_dir, lb_dir):
+        if os.path.exists(d):
+            shutil.rmtree(d)
+        os.makedirs(d)
     n_img = n_box = n_drop = 0
     for city in cities:
         for pf in sorted(glob.glob(f"{ROOT}/gtFine/{src_split}/{city}/*_polygons.json")):
